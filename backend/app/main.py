@@ -22,6 +22,7 @@ from .schemas import (
     LoginIn,
     ManufacturerOut,
     ModelOut,
+    PartCatalogLookupOut,
     SignupIn,
     OrderCreateWithItems,
     OrderItemCreate,
@@ -325,6 +326,33 @@ def list_models(
 def list_spare_parts(db: Session = Depends(get_db)):
     rows = db.execute(select(models.SparePart).order_by(models.SparePart.name)).scalars().all()
     return rows
+
+
+@app.get("/part-catalog", response_model=PartCatalogLookupOut)
+def lookup_part_catalog(
+    manufacturer_id: int = Query(..., ge=1),
+    model_id: int = Query(..., ge=1),
+    spare_part_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.execute(
+            select(models.PartCatalog).where(
+                models.PartCatalog.manufacturer_id == manufacturer_id,
+                models.PartCatalog.model_id == model_id,
+                models.PartCatalog.spare_part_id == spare_part_id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    return PartCatalogLookupOut(
+        manufacturer_id=manufacturer_id,
+        model_id=model_id,
+        spare_part_id=spare_part_id,
+        typical_specification=row.typical_specification if row else None,
+        oem_part_number=row.oem_part_number if row else None,
+    )
 
 
 @app.post("/order", response_model=OrderOut)

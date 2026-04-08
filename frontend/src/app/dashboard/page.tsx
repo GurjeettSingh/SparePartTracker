@@ -60,6 +60,13 @@ type DraftItem = {
   spare_part_name: string;
   quantity: number;
   available_stock: number;
+  typical_specification?: string | null;
+  oem_part_number?: string | null;
+};
+
+type PartCatalogMeta = {
+  typical_specification: string | null;
+  oem_part_number: string | null;
 };
 
 type Toast = { kind: "success" | "error"; message: string };
@@ -236,6 +243,9 @@ export default function DashboardPage() {
   const [quickAddText, setQuickAddText] = useState("");
   const [quickAdding, setQuickAdding] = useState(false);
 
+  const partCatalogCacheRef = useRef<Record<string, PartCatalogMeta>>({});
+  const partCatalogInflightRef = useRef<Record<string, Promise<PartCatalogMeta> | null>>({});
+
   const [supplierName, setSupplierName] = useState("");
   const [markingPurchased, setMarkingPurchased] = useState(false);
   const [savingStockById, setSavingStockById] = useState<Record<number, boolean>>({});
@@ -252,6 +262,39 @@ export default function DashboardPage() {
   const canSelectPart = modelId !== null;
 
   const currentItems: Array<OrderItem | DraftItem> = isSavedOrder ? currentOrder.items : draftItems;
+
+  const ensureDraftItemCatalogMeta = useCallback(async (manufacturer_id: number, model_id: number, spare_part_id: number) => {
+    const key = `${manufacturer_id}:${model_id}:${spare_part_id}`;
+    if (partCatalogCacheRef.current[key]) return;
+    const inflight = partCatalogInflightRef.current[key];
+    if (inflight) return;
+
+    const p = apiFetch<PartCatalogMeta>(
+      `/part-catalog?manufacturer_id=${manufacturer_id}&model_id=${model_id}&spare_part_id=${spare_part_id}`
+    )
+      .then((meta) => {
+        partCatalogCacheRef.current[key] = meta;
+        setDraftItems((prev) =>
+          prev.map((it) =>
+            it.manufacturer_id === manufacturer_id && it.model_id === model_id && it.spare_part_id === spare_part_id
+              ? { ...it, typical_specification: meta.typical_specification, oem_part_number: meta.oem_part_number }
+              : it
+          )
+        );
+        return meta;
+      })
+      .catch(() => {
+        const meta: PartCatalogMeta = { typical_specification: null, oem_part_number: null };
+        partCatalogCacheRef.current[key] = meta;
+        return meta;
+      })
+      .finally(() => {
+        partCatalogInflightRef.current[key] = null;
+      });
+
+    partCatalogInflightRef.current[key] = p;
+    await p;
+  }, []);
 
   useEffect(() => {
     setVisibleItemCount(50);
@@ -689,6 +732,8 @@ export default function DashboardPage() {
           ...prev,
         ];
       });
+
+      void ensureDraftItemCatalogMeta(args.manufacturer_id, args.model_id, args.spare_part_id);
 
       pushRecentItem({
         manufacturer_id: args.manufacturer_id,
@@ -1368,6 +1413,16 @@ export default function DashboardPage() {
     return by;
   }, [visibleItems, sparePartCategoryById]);
 
+  useEffect(() => {
+    if (isSavedOrder) return;
+    for (const it of visibleItems) {
+      if (("typical_specification" in it && it.typical_specification != null) || ("oem_part_number" in it && it.oem_part_number != null)) {
+        continue;
+      }
+      void ensureDraftItemCatalogMeta(it.manufacturer_id, it.model_id, it.spare_part_id);
+    }
+  }, [isSavedOrder, visibleItems, ensureDraftItemCatalogMeta]);
+
   const visibleSavedOrders = useMemo(() => orders.slice(0, visibleSavedOrdersCount), [orders, visibleSavedOrdersCount]);
   const hasMoreSavedOrders = orders.length > visibleSavedOrdersCount;
 
@@ -1844,6 +1899,9 @@ export default function DashboardPage() {
                     const isDeletingItem = !!deletingItemByKey[actionKey];
                     const rowBusy = isSavingEdit || isDeletingItem;
 
+                    const oem = item.oem_part_number ?? null;
+                    const typicalSpec = item.typical_specification ?? null;
+
                     const effectiveQty = isEditing ? editingQuantity : item.quantity;
                     const stock = "available_stock" in item ? (item.available_stock ?? 0) : 0;
                     const requiredQty = Number.isFinite(effectiveQty) ? Math.max(0, Math.floor(effectiveQty)) : 0;
@@ -1856,6 +1914,8 @@ export default function DashboardPage() {
                         <div className="mt-0.5 text-xs text-gray-600">
                           {item.manufacturer_name} • {item.model_name}
                         </div>
+                        {oem ? <div className="mt-1 text-xs text-gray-600">OEM: {oem}</div> : null}
+                        {typicalSpec ? <div className="mt-1 text-xs text-gray-600">{typicalSpec}</div> : null}
 
                         <div className="mt-3 grid grid-cols-2 gap-3">
                           <div>
@@ -1980,6 +2040,8 @@ export default function DashboardPage() {
                             const isSavingEdit = !!savingEditByKey[actionKey];
                             const isDeletingItem = !!deletingItemByKey[actionKey];
                             const rowBusy = isSavingEdit || isDeletingItem;
+                            const oem = item.oem_part_number ?? null;
+                            const typicalSpec = item.typical_specification ?? null;
                             const effectiveQty = isEditing ? editingQuantity : item.quantity;
                             const stock = "available_stock" in item ? (item.available_stock ?? 0) : 0;
                             const requiredQty = Number.isFinite(effectiveQty) ? Math.max(0, Math.floor(effectiveQty)) : 0;
@@ -1990,7 +2052,11 @@ export default function DashboardPage() {
                               <tr key={String(rowKey)} className="border-b">
                                 <td className="px-3 py-2">{item.manufacturer_name}</td>
                                 <td className="px-3 py-2">{item.model_name}</td>
-                                <td className="px-3 py-2">{item.spare_part_name}</td>
+                                <td className="px-3 py-2">
+                                  <div className="font-medium text-gray-900">{item.spare_part_name}</div>
+                                  {oem ? <div className="mt-0.5 text-xs text-gray-600">OEM: {oem}</div> : null}
+                                  {typicalSpec ? <div className="mt-0.5 text-xs text-gray-600">{typicalSpec}</div> : null}
+                                </td>
                                 <td className="px-3 py-2">
                                   {isEditing ? (
                                     <input

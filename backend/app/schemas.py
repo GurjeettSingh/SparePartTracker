@@ -61,6 +61,14 @@ class SparePartOut(ApiBaseModel):
     category: str = "Others"
 
 
+class PartCatalogLookupOut(ApiBaseModel):
+    manufacturer_id: int
+    model_id: int
+    spare_part_id: int
+    typical_specification: str | None = None
+    oem_part_number: str | None = None
+
+
 class OrderCreate(ApiBaseModel):
     pass
 
