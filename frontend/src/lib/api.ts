@@ -31,16 +31,60 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...getAuthHeaders(),
-      ...(init?.headers || {}),
-    },
-    cache: "no-store",
-  });
+type ApiFetchInit = RequestInit & {
+  timeoutMs?: number;
+  slowLogThresholdMs?: number;
+};
+
+function mergeAbortSignals(signalA?: AbortSignal, signalB?: AbortSignal): AbortSignal | undefined {
+  if (!signalA) return signalB;
+  if (!signalB) return signalA;
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+
+  if (signalA.aborted || signalB.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+
+  signalA.addEventListener("abort", abort, { once: true });
+  signalB.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}
+
+export async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
+  const timeoutMs = init?.timeoutMs ?? 12000;
+  const slowLogThresholdMs = init?.slowLogThresholdMs ?? 1000;
+
+  const timeoutController = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => timeoutController.abort(), timeoutMs);
+  const startedAt = Date.now();
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      signal: mergeAbortSignals(init?.signal, timeoutController.signal),
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(),
+        ...(init?.headers || {}),
+      },
+      cache: "no-store",
+    });
+  } catch (error) {
+    if ((error as DOMException)?.name === "AbortError") {
+      throw new ApiError(408, `Request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs > slowLogThresholdMs) {
+      console.warn(`[SPT] Slow API request ${path}: ${Math.round(elapsedMs)}ms`);
+    }
+  }
 
   if (!res.ok) {
     let detail: string | undefined;

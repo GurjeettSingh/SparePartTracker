@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -63,6 +63,12 @@ type DraftItem = {
 };
 
 type Toast = { kind: "success" | "error"; message: string };
+
+type SavedOrderActionState = {
+  opening: boolean;
+  renaming: boolean;
+  deleting: boolean;
+};
 
 type RecentItem = {
   manufacturer_id: number;
@@ -174,6 +180,8 @@ function Avatar({ name }: { name: string }) {
   );
 }
 
+const EMPTY_ORDER_ACTION_STATE: SavedOrderActionState = { opening: false, renaming: false, deleting: false };
+
 export default function DashboardPage() {
   const router = useRouter();
   const { user, logout } = useAuth();
@@ -211,6 +219,8 @@ export default function DashboardPage() {
 
   const [editingItemId, setEditingItemId] = useState<number | string | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number>(1);
+  const [savingEditByKey, setSavingEditByKey] = useState<Record<string, boolean>>({});
+  const [deletingItemByKey, setDeletingItemByKey] = useState<Record<string, boolean>>({});
 
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [importFileName, setImportFileName] = useState<string | null>(null);
@@ -227,6 +237,7 @@ export default function DashboardPage() {
   const [builderAvailableStock, setBuilderAvailableStock] = useState<number>(0);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [savedOrderActionById, setSavedOrderActionById] = useState<Record<number, SavedOrderActionState>>({});
 
   const isSavedOrder = currentOrder !== null;
   const canSelectModel = manufacturerId !== null;
@@ -758,14 +769,36 @@ export default function DashboardPage() {
     window.setTimeout(() => setToast(null), 2500);
   }
 
-  async function refreshOrders() {
-    const savedOrders = await apiFetch<OrderSummary[]>("/orders");
-    setOrders(savedOrders);
-  }
+  const setSavedOrderActionState = useCallback((orderId: number, patch: Partial<SavedOrderActionState>) => {
+    setSavedOrderActionById((prev) => ({
+      ...prev,
+      [orderId]: {
+        ...(prev[orderId] ?? EMPTY_ORDER_ACTION_STATE),
+        ...patch,
+      },
+    }));
+  }, []);
 
-  async function openOrder(orderId: number) {
+  const refreshOrders = useCallback(async () => {
+    try {
+      const savedOrders = await apiFetch<OrderSummary[]>("/orders");
+      setOrders(savedOrders);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError(e.detail || e.message);
+      } else {
+        setError(e instanceof Error ? e.message : "Failed to load orders");
+      }
+    }
+  }, []);
+
+  const openOrder = useCallback(async (orderId: number) => {
+    const actionState = savedOrderActionById[orderId] ?? EMPTY_ORDER_ACTION_STATE;
+    if (actionState.opening || actionState.renaming || actionState.deleting) return;
+
     setError(null);
     setLoading(true);
+    setSavedOrderActionState(orderId, { opening: true });
     try {
       const order = await apiFetch<SavedOrder>(`/order/${orderId}`);
       setCurrentOrder(order);
@@ -776,8 +809,9 @@ export default function DashboardPage() {
       setError(e instanceof Error ? e.message : "Failed to open order");
     } finally {
       setLoading(false);
+      setSavedOrderActionState(orderId, { opening: false });
     }
-  }
+  }, [savedOrderActionById, setSavedOrderActionState]);
 
   function updateDraftStock(key: string, next: number) {
     const normalized = Math.max(0, Number.isFinite(next) ? Math.floor(next) : 0);
@@ -826,41 +860,59 @@ export default function DashboardPage() {
     }
   }
 
-  async function renameOrder(orderId: number, currentName: string) {
+  const renameOrder = useCallback(async (orderId: number, currentName: string) => {
+    const actionState = savedOrderActionById[orderId] ?? EMPTY_ORDER_ACTION_STATE;
+    if (actionState.opening || actionState.renaming || actionState.deleting) return;
+
     const next = window.prompt("Enter new order name", currentName);
     if (!next) return;
     setError(null);
+    setSavedOrderActionState(orderId, { renaming: true });
+    const previousOrders = orders;
+
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, order_name: next } : o)));
     try {
       await apiFetch(`/order/${orderId}`, {
         method: "PATCH",
         body: JSON.stringify({ order_name: next }),
       });
-      await refreshOrders();
       if (currentOrder?.id === orderId) {
         setCurrentOrder({ ...currentOrder, order_name: next });
       }
       showToast("success", "Order renamed");
     } catch (e) {
+      setOrders(previousOrders);
       setError(e instanceof Error ? e.message : "Failed to rename order");
+    } finally {
+      setSavedOrderActionState(orderId, { renaming: false });
     }
-  }
+  }, [savedOrderActionById, orders, currentOrder, setSavedOrderActionState]);
 
-  async function deleteOrder(orderId: number) {
+  const deleteOrder = useCallback(async (orderId: number) => {
+    const actionState = savedOrderActionById[orderId] ?? EMPTY_ORDER_ACTION_STATE;
+    if (actionState.opening || actionState.renaming || actionState.deleting) return;
+
     const ok = window.confirm("Delete this order? This cannot be undone.");
     if (!ok) return;
     setError(null);
+    setSavedOrderActionState(orderId, { deleting: true });
+    const previousOrders = orders;
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+
     try {
       await apiFetch<void>(`/order/${orderId}`, { method: "DELETE" });
-      await refreshOrders();
       if (currentOrder?.id === orderId) {
         setCurrentOrder(null);
         setDraftItems([]);
       }
       showToast("success", "Order deleted");
     } catch (e) {
+      setOrders(previousOrders);
       setError(e instanceof Error ? e.message : "Failed to delete order");
+    } finally {
+      setSavedOrderActionState(orderId, { deleting: false });
     }
-  }
+  }, [savedOrderActionById, orders, currentOrder, setSavedOrderActionState]);
 
   async function handleAddItem() {
     setError(null);
@@ -1007,6 +1059,9 @@ export default function DashboardPage() {
 
   async function saveEdit(item: OrderItem | DraftItem) {
     setError(null);
+    const rowKey = String("id" in item ? item.id : item.key);
+    if (savingEditByKey[rowKey] || deletingItemByKey[rowKey]) return;
+
     if (!Number.isFinite(editingQuantity) || editingQuantity <= 0) {
       setError("Quantity must be greater than 0.");
       return;
@@ -1021,6 +1076,7 @@ export default function DashboardPage() {
       return;
     }
 
+    setSavingEditByKey((prev) => ({ ...prev, [rowKey]: true }));
     try {
       const updated = await apiFetch<OrderItem>(`/order-item/${item.id}`,
         {
@@ -1033,26 +1089,65 @@ export default function DashboardPage() {
       showToast("success", "Quantity updated");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update item");
+    } finally {
+      setSavingEditByKey((prev) => {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      });
     }
   }
 
   async function handleDeleteItem(item: OrderItem | DraftItem) {
     setError(null);
+    const rowKey = String("id" in item ? item.id : item.key);
+    if (savingEditByKey[rowKey] || deletingItemByKey[rowKey]) return;
+
+    setDeletingItemByKey((prev) => ({ ...prev, [rowKey]: true }));
     if (!isSavedOrder || !("id" in item)) {
       const key = "key" in item ? item.key : null;
-      if (!key) return;
+      if (!key) {
+        setDeletingItemByKey((prev) => {
+          const next = { ...prev };
+          delete next[rowKey];
+          return next;
+        });
+        return;
+      }
       setDraftItems((prev) => prev.filter((it) => it.key !== key));
       showToast("success", "Item removed");
+      setDeletingItemByKey((prev) => {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      });
       return;
     }
 
     try {
       await apiFetch<void>(`/order-item/${item.id}`, { method: "DELETE" });
       setCurrentOrder((prev) => (prev ? { ...prev, items: prev.items.filter((it) => it.id !== item.id) } : prev));
-      await refreshOrders();
+      if (currentOrder) {
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === currentOrder.id
+              ? {
+                  ...o,
+                  total_items: Math.max(0, o.total_items - 1),
+                }
+              : o
+          )
+        );
+      }
       showToast("success", "Item deleted");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete item");
+    } finally {
+      setDeletingItemByKey((prev) => {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      });
     }
   }
 
@@ -1090,7 +1185,18 @@ export default function DashboardPage() {
       setCurrentOrder(full);
       setDraftItems([]);
       clearDraftStorage();
-      await refreshOrders();
+      setOrders((prev) => {
+        const summary: OrderSummary = {
+          id: full.id,
+          order_name: full.order_name ?? `Order ${full.id}`,
+          created_at: full.created_at,
+          total_items: full.items.length,
+          status: full.status,
+          supplier_name: full.supplier_name ?? null,
+        };
+        const withoutCurrent = prev.filter((o) => o.id !== full.id);
+        return [summary, ...withoutCurrent];
+      });
       showToast("success", "Order saved");
     } catch (e) {
       if (e instanceof ApiError) {
@@ -1722,7 +1828,11 @@ export default function DashboardPage() {
                         ),
                         ...itemsInCategory.map((item) => {
                           const rowKey = "id" in item ? item.id : item.key;
+                          const actionKey = String(rowKey);
                           const isEditing = editingItemId === rowKey;
+                          const isSavingEdit = !!savingEditByKey[actionKey];
+                          const isDeletingItem = !!deletingItemByKey[actionKey];
+                          const rowBusy = isSavingEdit || isDeletingItem;
                           const effectiveQty = isEditing ? editingQuantity : item.quantity;
                           const stock = "available_stock" in item ? (item.available_stock ?? 0) : 0;
                           const requiredQty = Number.isFinite(effectiveQty) ? Math.max(0, Math.floor(effectiveQty)) : 0;
@@ -1788,20 +1898,20 @@ export default function DashboardPage() {
                               <td className="px-3 py-2">
                                 {isEditing ? (
                                   <div className="flex gap-2">
-                                    <button className={primarySmBtn} onClick={() => void saveEdit(item)}>
-                                      Save
+                                    <button className={primarySmBtn} onClick={() => void saveEdit(item)} disabled={rowBusy}>
+                                      {isSavingEdit ? "Saving..." : "Save"}
                                     </button>
-                                    <button className={outlineSmBtn} onClick={cancelEdit}>
+                                    <button className={outlineSmBtn} onClick={cancelEdit} disabled={rowBusy}>
                                       Cancel
                                     </button>
                                   </div>
                                 ) : (
                                   <div className="flex gap-2">
-                                    <button className={outlineSmBtn} onClick={() => startEdit(item)}>
+                                    <button className={outlineSmBtn} onClick={() => startEdit(item)} disabled={rowBusy}>
                                       Edit
                                     </button>
-                                    <button className={dangerSmBtn} onClick={() => void handleDeleteItem(item)}>
-                                      Delete
+                                    <button className={dangerSmBtn} onClick={() => void handleDeleteItem(item)} disabled={rowBusy}>
+                                      {isDeletingItem ? "Deleting..." : "Delete"}
                                     </button>
                                   </div>
                                 )}
@@ -1856,14 +1966,38 @@ export default function DashboardPage() {
                         <td className="px-3 py-2">{o.total_items}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-2">
-                            <button className={outlineSmBtn} onClick={() => void openOrder(o.id)}>
-                              Open/Edit
+                            <button
+                              className={outlineSmBtn}
+                              onClick={() => void openOrder(o.id)}
+                              disabled={
+                                (savedOrderActionById[o.id]?.opening ?? false) ||
+                                (savedOrderActionById[o.id]?.renaming ?? false) ||
+                                (savedOrderActionById[o.id]?.deleting ?? false)
+                              }
+                            >
+                              {savedOrderActionById[o.id]?.opening ? "Opening..." : "Open/Edit"}
                             </button>
-                            <button className={outlineSmBtn} onClick={() => void renameOrder(o.id, o.order_name)}>
-                              Rename
+                            <button
+                              className={outlineSmBtn}
+                              onClick={() => void renameOrder(o.id, o.order_name)}
+                              disabled={
+                                (savedOrderActionById[o.id]?.opening ?? false) ||
+                                (savedOrderActionById[o.id]?.renaming ?? false) ||
+                                (savedOrderActionById[o.id]?.deleting ?? false)
+                              }
+                            >
+                              {savedOrderActionById[o.id]?.renaming ? "Renaming..." : "Rename"}
                             </button>
-                            <button className={dangerSmBtn} onClick={() => void deleteOrder(o.id)}>
-                              Delete
+                            <button
+                              className={dangerSmBtn}
+                              onClick={() => void deleteOrder(o.id)}
+                              disabled={
+                                (savedOrderActionById[o.id]?.opening ?? false) ||
+                                (savedOrderActionById[o.id]?.renaming ?? false) ||
+                                (savedOrderActionById[o.id]?.deleting ?? false)
+                              }
+                            >
+                              {savedOrderActionById[o.id]?.deleting ? "Deleting..." : "Delete"}
                             </button>
                           </div>
                         </td>

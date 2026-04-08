@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -15,6 +15,11 @@ type OrderSummary = {
   total_items: number;
 };
 
+type RowActionState = {
+  renaming: boolean;
+  deleting: boolean;
+};
+
 function fmtDate(iso: string) {
   try {
     return new Date(iso).toLocaleString();
@@ -22,6 +27,48 @@ function fmtDate(iso: string) {
     return iso;
   }
 }
+
+const EMPTY_ACTION_STATE: RowActionState = { renaming: false, deleting: false };
+
+const OrderRow = memo(function OrderRow({
+  order,
+  onRename,
+  onDelete,
+  renaming,
+  deleting,
+  outlineSmBtn,
+  dangerSmBtn,
+}: {
+  order: OrderSummary;
+  onRename: (orderId: number, currentName: string) => Promise<void>;
+  onDelete: (orderId: number) => Promise<void>;
+  renaming: boolean;
+  deleting: boolean;
+  outlineSmBtn: string;
+  dangerSmBtn: string;
+}) {
+  const rowBusy = renaming || deleting;
+  return (
+    <tr className="border-b">
+      <td className="px-3 py-2">{order.order_name}</td>
+      <td className="px-3 py-2">{fmtDate(order.created_at)}</td>
+      <td className="px-3 py-2">{order.total_items}</td>
+      <td className="px-3 py-2">
+        <div className="flex gap-2">
+          <Link className={outlineSmBtn} href={`/dashboard?orderId=${order.id}`} aria-disabled={rowBusy}>
+            Open/Edit
+          </Link>
+          <button className={outlineSmBtn} onClick={() => void onRename(order.id, order.order_name)} disabled={rowBusy}>
+            {renaming ? "Renaming..." : "Rename"}
+          </button>
+          <button className={dangerSmBtn} onClick={() => void onDelete(order.id)} disabled={rowBusy}>
+            {deleting ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
 
 export default function MyOrdersPage() {
   const router = useRouter();
@@ -31,6 +78,7 @@ export default function MyOrdersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [actionStateById, setActionStateById] = useState<Record<number, RowActionState>>({});
 
   useEffect(() => {
     if (!user?.workshop_name) return;
@@ -44,7 +92,7 @@ export default function MyOrdersPage() {
     return () => window.removeEventListener("click", onClick);
   }, [menuOpen]);
 
-  async function refresh() {
+  const refresh = useCallback(async function refresh() {
     setLoading(true);
     setError(null);
     try {
@@ -56,26 +104,51 @@ export default function MyOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  const setRowActionState = useCallback((orderId: number, patch: Partial<RowActionState>) => {
+    setActionStateById((prev) => ({
+      ...prev,
+      [orderId]: {
+        ...(prev[orderId] ?? EMPTY_ACTION_STATE),
+        ...patch,
+      },
+    }));
   }, []);
 
-  async function deleteOrder(orderId: number) {
+  const deleteOrder = useCallback(async (orderId: number) => {
+    const rowState = actionStateById[orderId] ?? EMPTY_ACTION_STATE;
+    if (rowState.deleting || rowState.renaming) return;
+
     const ok = window.confirm("Delete this order? This cannot be undone.");
     if (!ok) return;
+
+    const previousOrders = orders;
     setError(null);
+    setRowActionState(orderId, { deleting: true });
+
+    // Optimistic remove to keep UI responsive.
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+
     try {
       await apiFetch<void>(`/order/${orderId}`, { method: "DELETE" });
-      await refresh();
     } catch (e) {
+      setOrders(previousOrders);
       if (e instanceof ApiError) setError(e.detail || e.message);
       else setError(e instanceof Error ? e.message : "Failed to delete order");
+    } finally {
+      setRowActionState(orderId, { deleting: false });
     }
-  }
+  }, [actionStateById, orders, setRowActionState]);
 
-  async function renameOrder(orderId: number, currentName: string) {
+  const renameOrder = useCallback(async (orderId: number, currentName: string) => {
+    const rowState = actionStateById[orderId] ?? EMPTY_ACTION_STATE;
+    if (rowState.deleting || rowState.renaming) return;
+
     const match = /^(.*?)(\s-\s\d{2}-\d{2}-\d{4})$/.exec(currentName.trim());
     const base = match ? match[1].trim() : currentName.trim();
     const suffix = match ? match[2] : "";
@@ -88,17 +161,25 @@ export default function MyOrdersPage() {
     const nextName = suffix ? `${trimmed}${suffix}` : trimmed;
 
     setError(null);
+    setRowActionState(orderId, { renaming: true });
+    const previousOrders = orders;
+
+    // Optimistic rename so row updates immediately.
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, order_name: nextName } : o)));
+
     try {
       await apiFetch(`/order/${orderId}`, {
         method: "PATCH",
         body: JSON.stringify({ order_name: nextName }),
       });
-      await refresh();
     } catch (e) {
+      setOrders(previousOrders);
       if (e instanceof ApiError) setError(e.detail || e.message);
       else setError(e instanceof Error ? e.message : "Failed to rename order");
+    } finally {
+      setRowActionState(orderId, { renaming: false });
     }
-  }
+  }, [actionStateById, orders, setRowActionState]);
 
   const outlineBtn =
     "inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
@@ -106,6 +187,26 @@ export default function MyOrdersPage() {
     "inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
   const dangerSmBtn =
     "inline-flex items-center justify-center rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50";
+
+  const renderedRows = useMemo(
+    () =>
+      orders.map((o) => {
+        const state = actionStateById[o.id] ?? EMPTY_ACTION_STATE;
+        return (
+          <OrderRow
+            key={o.id}
+            order={o}
+            onRename={renameOrder}
+            onDelete={deleteOrder}
+            renaming={state.renaming}
+            deleting={state.deleting}
+            outlineSmBtn={outlineSmBtn}
+            dangerSmBtn={dangerSmBtn}
+          />
+        );
+      }),
+    [orders, actionStateById, renameOrder, deleteOrder, outlineSmBtn, dangerSmBtn]
+  );
 
   return (
     <RequireAuth>
@@ -193,28 +294,7 @@ export default function MyOrdersPage() {
                         </div>
                       </td>
                     </tr>
-                  ) : (
-                    orders.map((o) => (
-                      <tr key={o.id} className="border-b">
-                        <td className="px-3 py-2">{o.order_name}</td>
-                        <td className="px-3 py-2">{fmtDate(o.created_at)}</td>
-                        <td className="px-3 py-2">{o.total_items}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex gap-2">
-                            <Link className={outlineSmBtn} href={`/dashboard?orderId=${o.id}`}>
-                              Open/Edit
-                            </Link>
-                            <button className={outlineSmBtn} onClick={() => void renameOrder(o.id, o.order_name)}>
-                              Rename
-                            </button>
-                            <button className={dangerSmBtn} onClick={() => void deleteOrder(o.id)}>
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ) : renderedRows}
                 </tbody>
               </table>
             </div>

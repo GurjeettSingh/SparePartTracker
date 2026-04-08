@@ -232,8 +232,13 @@ export default function InventoryPage() {
       if (process.env.NODE_ENV !== "production") {
         console.log("[SPT] POST /inventory response:", row);
       }
-      const inv = await loadInventoryCached(true);
-      setInventory(inv);
+      setInventory((prev) => {
+        const idx = prev.findIndex((r) => r.id === row.id);
+        if (idx >= 0) {
+          return prev.map((r) => (r.id === row.id ? row : r));
+        }
+        return [row, ...prev];
+      });
       setManufacturerId(null);
       setModelId(null);
       setSparePartId(null);
@@ -272,8 +277,13 @@ export default function InventoryPage() {
       if (process.env.NODE_ENV !== "production") {
         console.log("[SPT] Quick Add response:", row);
       }
-      const inv = await loadInventoryCached(true);
-      setInventory(inv);
+      setInventory((prev) => {
+        const idx = prev.findIndex((r) => r.id === row.id);
+        if (idx >= 0) {
+          return prev.map((r) => (r.id === row.id ? row : r));
+        }
+        return [row, ...prev];
+      });
       setQuickAddText("");
       showToast("success", "Item added to inventory");
     } catch (e) {
