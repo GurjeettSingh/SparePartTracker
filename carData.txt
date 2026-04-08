@@ -1,0 +1,71 @@
+Manufacturer,Model,Vehicle Type,Item,Typical Specification / Note,OEM Part Number (Common/Rep)
+Maruti Suzuki,Swift / Dzire,Car,Oil Filter,Spin-on,16510M65L10
+Maruti Suzuki,Swift / Dzire,Car,Air Filter,Standard Paper Element,13780M74L00
+Maruti Suzuki,Swift / Dzire,Car,Cabin (AC) Filter,Fiber Mesh,990J0M67L17-010
+Maruti Suzuki,Swift / Dzire,Car,Fuel Filter,In-tank (P) / Inline (D),15411M69P00
+Maruti Suzuki,Swift / Dzire,Car,Front Brake Pads,Disc Pad Set,55810M75J30
+Maruti Suzuki,Swift / Dzire,Car,Spark Plug,Nickel / Iridium,09482M00609
+Maruti Suzuki,Brezza,Car,Oil Filter,Spin-on,16510M65L10
+Maruti Suzuki,Brezza,Car,Air Filter,Standard Paper Element,13780M82PA0
+Maruti Suzuki,Brezza,Car,Front Brake Pads,Disc Pad Set,55810M82P00
+Maruti Suzuki,Brezza,Car,Wiper Blades,Front Set (24" & 16"),38340M82P00
+Maruti Suzuki,Wagon R,Car,Oil Filter,Spin-on,16510M65L10
+Maruti Suzuki,Wagon R,Car,Spark Plug,Standard Nickel,09482M00609
+Hyundai,Creta,SUV,Oil Filter,Cartridge / Spin-on,26300-35505
+Hyundai,Creta,SUV,Air Filter,Standard Paper Element,28113-A0100
+Hyundai,Creta,SUV,Cabin (AC) Filter,Fiber Mesh / Active Carbon,97133-A0000
+Hyundai,Creta,SUV,Fuel Filter,Inline Diesel Cartridge,31922-A6900
+Hyundai,Creta,SUV,Front Brake Pads,Disc Pad Set,58101-C3A00
+Hyundai,Creta,SUV,V-Belt / Drive Belt,Ribbed Belt,25212-2B000
+Hyundai,i20,Car,Oil Filter,Spin-on,26300-02503
+Hyundai,i20,Car,Air Filter,Standard Paper Element,28113-Q6100
+Hyundai,i20,Car,Spark Plug,Standard Nickel,18855-10060
+Hyundai,Venue,SUV,Oil Filter,Spin-on,26300-02503
+Hyundai,Venue,SUV,Fuel Filter,Inline Diesel,31922-A6000
+Tata Motors,Nexon,SUV,Oil Filter,Cartridge,543818130101
+Tata Motors,Nexon,SUV,Air Filter,Standard Paper Element,571509130113
+Tata Motors,Nexon,SUV,Cabin (AC) Filter,Fiber Mesh,543883003601
+Tata Motors,Nexon,SUV,Fuel Filter,Inline Diesel,543847100118
+Tata Motors,Nexon,SUV,Front Brake Pads,Disc Pad Set,543842100111
+Tata Motors,Punch,SUV,Oil Filter,Spin-on,571318130106
+Tata Motors,Punch,SUV,Air Filter,Standard Paper Element,571309130102
+Tata Motors,Harrier / Safari,SUV,Oil Filter,Cartridge,532618130101
+Tata Motors,Harrier / Safari,SUV,Front Brake Pads,Heavy Duty Disc Pad Set,532642100101
+Mahindra,Scorpio / Scorpio-N,Jeep/SUV,Oil Filter,Cartridge,0303BAU00110N
+Mahindra,Scorpio / Scorpio-N,Jeep/SUV,Air Filter,Heavy Duty Paper Element,0313ABH00021N
+Mahindra,Scorpio / Scorpio-N,Jeep/SUV,Fuel Filter,Diesel Stage Filter,0301CC0041N
+Mahindra,Scorpio / Scorpio-N,Jeep/SUV,Front Brake Pads,Heavy Duty Disc Pad Set,0603AAB00071N
+Mahindra,Thar,Jeep/SUV,Oil Filter,Cartridge,0303BC0071N
+Mahindra,Thar,Jeep/SUV,Air Filter,Heavy Duty Paper Element,0313ABH00041N
+Mahindra,Thar,Jeep/SUV,Fuel Filter,Diesel Stage Filter,0301CC0041N
+Toyota,Innova Crysta,MUV,Oil Filter,Cartridge,04152-YZZA6
+Toyota,Innova Crysta,MUV,Cabin (AC) Filter,Active Carbon,87139-58010
+Toyota,Innova Crysta,MUV,Front Brake Pads,Disc Pad Set,04465-0K360
+Toyota,Fortuner,SUV,Air Filter,Heavy Duty Paper Element,17801-0L040
+Toyota,Fortuner,SUV,Fuel Filter,Diesel Cartridge,23390-0L070
+Honda,City,Car,Oil Filter,Spin-on,15400-RTA-003
+Honda,City,Car,Air Filter,Standard Paper Element,17220-55A-Z01
+Honda,City,Car,Cabin (AC) Filter,Fiber Mesh,80292-TZA-J01
+Honda,City,Car,Front Brake Pads,Disc Pad Set,45022-T7A-000
+Honda,Amaze,Car,Oil Filter,Spin-on,15400-RTA-003
+Honda,Amaze,Car,Air Filter,Standard Paper Element,17220-5R0-008
+Honda,Amaze,Car,Spark Plug,Iridium,12290-5R0-003
+Kia,Seltos,SUV,Oil Filter,Cartridge / Spin-on,26300-35505
+Kia,Seltos,SUV,Air Filter,Standard Paper Element,28113-Q5000
+Kia,Sonet,SUV,Cabin (AC) Filter,Fiber Mesh,97133-A0000
+Ford,EcoSport,SUV,Oil Filter,Spin-on / Cartridge,2S6Q-6714-AB
+Ford,EcoSport,SUV,Air Filter,Standard Paper Element,CN11-9601-AD
+Ford,EcoSport,SUV,Fuel Filter,Diesel Inline,CN11-9G230-AA
+Ford,EcoSport,SUV,Front Brake Pads,Disc Pad Set,CN15-2K021-AA
+Renault,Kwid,Car,Oil Filter,Spin-on,152095084R
+Renault,Kwid,Car,Air Filter,Standard Paper Element,165463164R
+Renault,Kiger,SUV,Oil Filter,Spin-on,152095084R
+Renault,Kiger,SUV,Cabin (AC) Filter,Fiber Mesh,272778773R
+Jeep,Compass,SUV,Oil Filter,Cartridge,46337554
+Jeep,Compass,SUV,Air Filter,Standard Paper Element,52022378AA
+Jeep,Compass,SUV,Front Brake Pads,Disc Pad Set,77368208
+MG,Hector,SUV,Oil Filter,Cartridge,10223129
+MG,Hector,SUV,Cabin (AC) Filter,Fiber Mesh / Active Carbon,10323381
+Skoda/Volkswagen,Kushaq / Taigun,SUV,Oil Filter,Cartridge,04E115561H
+Skoda/Volkswagen,Kushaq / Taigun,SUV,Air Filter,Standard Paper Element,04E129620A
+Skoda/Volkswagen,Kushaq / Taigun,SUV,Front Brake Pads,Disc Pad Set,2Q0698151A
