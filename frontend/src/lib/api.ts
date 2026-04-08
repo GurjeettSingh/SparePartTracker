@@ -36,20 +36,28 @@ type ApiFetchInit = RequestInit & {
   slowLogThresholdMs?: number;
 };
 
-function mergeAbortSignals(signalA?: AbortSignal, signalB?: AbortSignal): AbortSignal | undefined {
+function mergeAbortSignals(
+  signalA?: AbortSignal,
+  signalB?: AbortSignal
+): AbortSignal | undefined {
   if (!signalA) return signalB;
   if (!signalB) return signalA;
 
   const controller = new AbortController();
-  const abort = () => controller.abort();
+
+  const abort = () => {
+    controller.abort();
+    signalA.removeEventListener("abort", abort);
+    signalB.removeEventListener("abort", abort);
+  };
 
   if (signalA.aborted || signalB.aborted) {
     controller.abort();
-    return controller.signal;
+  } else {
+    signalA.addEventListener("abort", abort);
+    signalB.addEventListener("abort", abort);
   }
 
-  signalA.addEventListener("abort", abort, { once: true });
-  signalB.addEventListener("abort", abort, { once: true });
   return controller.signal;
 }
 
