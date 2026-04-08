@@ -79,6 +79,7 @@ export default function MyOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionStateById, setActionStateById] = useState<Record<number, RowActionState>>({});
+  const [visibleCount, setVisibleCount] = useState(30);
 
   useEffect(() => {
     if (!user?.workshop_name) return;
@@ -190,7 +191,7 @@ export default function MyOrdersPage() {
 
   const renderedRows = useMemo(
     () =>
-      orders.map((o) => {
+      orders.slice(0, visibleCount).map((o) => {
         const state = actionStateById[o.id] ?? EMPTY_ACTION_STATE;
         return (
           <OrderRow
@@ -207,6 +208,9 @@ export default function MyOrdersPage() {
       }),
     [orders, actionStateById, renameOrder, deleteOrder, outlineSmBtn, dangerSmBtn]
   );
+
+  const visibleOrders = useMemo(() => orders.slice(0, visibleCount), [orders, visibleCount]);
+  const hasMoreOrders = orders.length > visibleCount;
 
   return (
     <RequireAuth>
@@ -272,32 +276,76 @@ export default function MyOrdersPage() {
           ) : null}
 
           <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-md">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b bg-zinc-50">
-                    <th className="px-3 py-2 font-medium">Order Name</th>
-                    <th className="px-3 py-2 font-medium">Date</th>
-                    <th className="px-3 py-2 font-medium">Total Items</th>
-                    <th className="px-3 py-2 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-10 text-center" colSpan={4}>
-                        <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
-                          <div className="mb-1 text-sm font-semibold">No saved orders yet</div>
-                          <div className="text-sm text-gray-600">
-                            Create a draft in the dashboard and click “Save Order”.
+            {orders.length === 0 ? (
+              <div className="px-3 py-10 text-center">
+                <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
+                  <div className="mb-1 text-sm font-semibold">No saved orders yet</div>
+                  <div className="text-sm text-gray-600">Create a draft in the dashboard and click “Save Order”.</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Mobile/Tablet: Cards */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:hidden">
+                  {visibleOrders.map((o) => {
+                    const state = actionStateById[o.id] ?? EMPTY_ACTION_STATE;
+                    const rowBusy = state.renaming || state.deleting;
+                    return (
+                      <div key={o.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                        <div className="text-sm font-semibold text-gray-900">{o.order_name}</div>
+                        <div className="mt-0.5 text-xs text-gray-600">{fmtDate(o.created_at)}</div>
+                        <div className="mt-2 text-sm text-gray-700">Total items: {o.total_items}</div>
+
+                        <div className="mt-3 grid grid-cols-1 gap-2">
+                          <Link
+                            className={`${outlineBtn} w-full`}
+                            href={`/dashboard?orderId=${o.id}`}
+                            aria-disabled={rowBusy}
+                          >
+                            Open/Edit
+                          </Link>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              className={`${outlineBtn} w-full`}
+                              onClick={() => void renameOrder(o.id, o.order_name)}
+                              disabled={rowBusy}
+                            >
+                              {state.renaming ? "Renaming..." : "Rename"}
+                            </button>
+                            <button className={`${outlineBtn} w-full border-red-200 text-red-700 hover:bg-red-50 focus:ring-red-200`} onClick={() => void deleteOrder(o.id)} disabled={rowBusy}>
+                              {state.deleting ? "Deleting..." : "Delete"}
+                            </button>
                           </div>
                         </div>
-                      </td>
-                    </tr>
-                  ) : renderedRows}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop: Table */}
+                <div className="hidden overflow-x-auto lg:block">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b bg-zinc-50">
+                        <th className="px-3 py-2 font-medium">Order Name</th>
+                        <th className="px-3 py-2 font-medium">Date</th>
+                        <th className="px-3 py-2 font-medium">Total Items</th>
+                        <th className="px-3 py-2 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>{renderedRows}</tbody>
+                  </table>
+                </div>
+
+                {hasMoreOrders ? (
+                  <div className="mt-4 flex justify-center">
+                    <button className={outlineBtn} onClick={() => setVisibleCount((v) => v + 30)}>
+                      Load more
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
           </section>
         </div>
       </div>

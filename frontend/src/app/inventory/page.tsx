@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -17,6 +17,59 @@ type Model = { id: number; name: string; manufacturer_id: number };
 type SparePart = { id: number; name: string; category: string };
 
 type Toast = { kind: "success" | "error"; message: string };
+
+const InventoryCard = memo(function InventoryCard({
+  row,
+  effective,
+  saving,
+  onChange,
+  onCommit,
+}: {
+  row: InventoryRow;
+  effective: number;
+  saving: boolean;
+  onChange: (next: number) => void;
+  onCommit: () => void;
+}) {
+  const low = effective === 0;
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-gray-900">{row.spare_part_name}</div>
+      <div className="mt-0.5 text-xs text-gray-600">
+        {row.manufacturer_name} • {row.model_name}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-xs font-medium text-gray-600">Stock</div>
+          <input
+            className={`mt-1 w-full rounded-xl border px-3 py-2 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-gray-50 ${
+              low ? "border-amber-200" : "border-gray-200"
+            }`}
+            type="number"
+            min={0}
+            value={effective}
+            disabled={saving}
+            onChange={(e) => onChange(Number(e.target.value))}
+            onBlur={onCommit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onCommit();
+              }
+            }}
+          />
+        </div>
+
+        <div>
+          <div className="text-xs font-medium text-gray-600">Last Updated</div>
+          <div className="mt-2 text-sm text-gray-700">{fmtDate(row.updated_at)}</div>
+          <div className="mt-1 text-xs text-gray-600">{saving ? "Saving…" : "Auto"}</div>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 function fmtDate(iso: string) {
   try {
@@ -41,6 +94,8 @@ export default function InventoryPage() {
   const [toast, setToast] = useState<Toast | null>(null);
 
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
+  const [visibleCount, setVisibleCount] = useState(50);
   const [editing, setEditing] = useState<Record<number, number>>({});
   const [saving, setSaving] = useState<Record<number, boolean>>({});
 
@@ -193,11 +248,18 @@ export default function InventoryPage() {
   );
 
   const filteredInventory = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     const rows = inventory.slice().sort((a, b) => a.spare_part_name.localeCompare(b.spare_part_name));
     if (!q) return rows;
     return rows.filter((r) => `${r.manufacturer_name} ${r.model_name} ${r.spare_part_name}`.toLowerCase().includes(q));
-  }, [inventory, query]);
+  }, [inventory, deferredQuery]);
+
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [deferredQuery]);
+
+  const visibleInventory = useMemo(() => filteredInventory.slice(0, visibleCount), [filteredInventory, visibleCount]);
+  const hasMoreInventory = filteredInventory.length > visibleCount;
 
   async function addToInventory() {
     if (!manufacturerId || !modelId || !sparePartId) {
@@ -483,90 +545,115 @@ export default function InventoryPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b bg-zinc-50">
-                    <th className="px-3 py-2 font-medium">Manufacturer</th>
-                    <th className="px-3 py-2 font-medium">Model</th>
-                    <th className="px-3 py-2 font-medium">Spare Part</th>
-                    <th className="px-3 py-2 font-medium">Stock</th>
-                    <th className="px-3 py-2 font-medium">Last Updated</th>
-                    <th className="px-3 py-2 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td className="px-3 py-10 text-center" colSpan={6}>
-                        <div className="flex items-center justify-center gap-2 text-gray-700">
-                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" />
-                          <div>Loading…</div>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : inventory.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-10 text-center" colSpan={6}>
-                        <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
-                          <div className="mb-1 text-sm font-semibold">No inventory yet</div>
-                          <div className="mb-3 text-sm text-gray-600">Use “Add to Inventory” above to create your first item.</div>
-                          <button className={outlineBtn} type="button" onClick={focusAddForm}>
-                            Add Inventory Item
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : filteredInventory.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-10 text-center" colSpan={6}>
-                        No matching inventory items.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredInventory.map((row) => {
-                      const draft = editing[row.id];
-                      const effective = Number.isFinite(draft) ? Math.max(0, Math.floor(draft)) : row.stock_quantity;
-                      const low = effective === 0;
-                      return (
-                        <tr key={row.id} className="border-b">
-                          <td className="px-3 py-2">{row.manufacturer_name}</td>
-                          <td className="px-3 py-2">{row.model_name}</td>
-                          <td className="px-3 py-2">
-                            <div className="font-medium">{row.spare_part_name}</div>
-                          </td>
-                          <td className={`px-3 py-2 ${low ? "text-amber-800" : ""}`}>
-                            <input
-                              className="w-24 rounded-md border px-2 py-1"
-                              type="number"
-                              min={0}
-                              value={effective}
-                              disabled={!!saving[row.id]}
-                              onChange={(e) => setEditing((prev) => ({ ...prev, [row.id]: Number(e.target.value) }))}
-                              onBlur={() => {
-                                if (row.id in editing) {
-                                  void saveRow(row.id);
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  void saveRow(row.id);
-                                }
-                              }}
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-gray-600">{fmtDate(row.updated_at)}</td>
-                          <td className="px-3 py-2">
-                            {saving[row.id] ? <span className="text-xs text-gray-600">Saving…</span> : <span className="text-xs text-gray-500">Auto</span>}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+            {loading ? (
+              <div className="px-3 py-10">
+                <div className="flex items-center justify-center gap-2 text-gray-700">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-700" />
+                  <div>Loading…</div>
+                </div>
+              </div>
+            ) : inventory.length === 0 ? (
+              <div className="px-3 py-10 text-center">
+                <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
+                  <div className="mb-1 text-sm font-semibold">No inventory yet</div>
+                  <div className="mb-3 text-sm text-gray-600">Use “Add to Inventory” above to create your first item.</div>
+                  <button className={outlineBtn} type="button" onClick={focusAddForm}>
+                    Add Inventory Item
+                  </button>
+                </div>
+              </div>
+            ) : filteredInventory.length === 0 ? (
+              <div className="px-3 py-10 text-center">No matching inventory items.</div>
+            ) : (
+              <>
+                {/* Mobile/Tablet: Cards */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:hidden">
+                  {visibleInventory.map((row) => {
+                    const draft = editing[row.id];
+                    const effective = Number.isFinite(draft) ? Math.max(0, Math.floor(draft)) : row.stock_quantity;
+                    return (
+                      <InventoryCard
+                        key={row.id}
+                        row={row}
+                        effective={effective}
+                        saving={!!saving[row.id]}
+                        onChange={(next) => setEditing((prev) => ({ ...prev, [row.id]: next }))}
+                        onCommit={() => {
+                          if (row.id in editing) {
+                            void saveRow(row.id);
+                          }
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Desktop: Table */}
+                <div className="hidden overflow-x-auto lg:block">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b bg-zinc-50">
+                        <th className="px-3 py-2 font-medium">Manufacturer</th>
+                        <th className="px-3 py-2 font-medium">Model</th>
+                        <th className="px-3 py-2 font-medium">Spare Part</th>
+                        <th className="px-3 py-2 font-medium">Stock</th>
+                        <th className="px-3 py-2 font-medium">Last Updated</th>
+                        <th className="px-3 py-2 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleInventory.map((row) => {
+                        const draft = editing[row.id];
+                        const effective = Number.isFinite(draft) ? Math.max(0, Math.floor(draft)) : row.stock_quantity;
+                        const low = effective === 0;
+                        return (
+                          <tr key={row.id} className="border-b">
+                            <td className="px-3 py-2">{row.manufacturer_name}</td>
+                            <td className="px-3 py-2">{row.model_name}</td>
+                            <td className="px-3 py-2">
+                              <div className="font-medium">{row.spare_part_name}</div>
+                            </td>
+                            <td className={`px-3 py-2 ${low ? "text-amber-800" : ""}`}>
+                              <input
+                                className="w-24 rounded-md border px-2 py-1"
+                                type="number"
+                                min={0}
+                                value={effective}
+                                disabled={!!saving[row.id]}
+                                onChange={(e) => setEditing((prev) => ({ ...prev, [row.id]: Number(e.target.value) }))}
+                                onBlur={() => {
+                                  if (row.id in editing) {
+                                    void saveRow(row.id);
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    void saveRow(row.id);
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td className="px-3 py-2 text-gray-600">{fmtDate(row.updated_at)}</td>
+                            <td className="px-3 py-2">
+                              {saving[row.id] ? <span className="text-xs text-gray-600">Saving…</span> : <span className="text-xs text-gray-500">Auto</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {hasMoreInventory ? (
+                  <div className="mt-4 flex justify-center">
+                    <button className={outlineBtn} type="button" onClick={() => setVisibleCount((v) => v + 50)}>
+                      Load more
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
 
             <div className="mt-4 flex justify-end">
               <Link className={outlineBtn} href="/dashboard">

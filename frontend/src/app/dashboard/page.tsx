@@ -111,6 +111,12 @@ function safeDownloadFilename(base: string, ext: "pdf" | "xlsx") {
   return `${withoutExt}.${ext}`;
 }
 
+function makeClientId(): string {
+  const c = (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 const DRAFT_STORAGE_KEY = "draft_order";
 const RECENT_ITEMS_KEY = "recent_items";
 
@@ -221,6 +227,8 @@ export default function DashboardPage() {
   const [editingQuantity, setEditingQuantity] = useState<number>(1);
   const [savingEditByKey, setSavingEditByKey] = useState<Record<string, boolean>>({});
   const [deletingItemByKey, setDeletingItemByKey] = useState<Record<string, boolean>>({});
+  const [visibleItemCount, setVisibleItemCount] = useState(50);
+  const [visibleSavedOrdersCount, setVisibleSavedOrdersCount] = useState(20);
 
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [importFileName, setImportFileName] = useState<string | null>(null);
@@ -244,6 +252,10 @@ export default function DashboardPage() {
   const canSelectPart = modelId !== null;
 
   const currentItems: Array<OrderItem | DraftItem> = isSavedOrder ? currentOrder.items : draftItems;
+
+  useEffect(() => {
+    setVisibleItemCount(50);
+  }, [isSavedOrder, currentOrder?.id]);
 
   useEffect(() => {
     if (!user?.workshop_name) return;
@@ -436,7 +448,7 @@ export default function DashboardPage() {
             .filter(Boolean)
             .map((it) => ({
               ...it,
-              key: typeof it.key === "string" && it.key ? it.key : crypto.randomUUID(),
+              key: typeof it.key === "string" && it.key ? it.key : makeClientId(),
               quantity: Number.isFinite(it.quantity) ? Math.max(0, Math.floor(it.quantity)) : 0,
               available_stock: Number.isFinite(it.available_stock) ? Math.max(0, Math.floor(it.available_stock)) : 0,
             }))
@@ -664,7 +676,7 @@ export default function DashboardPage() {
         }
         return [
           {
-            key: crypto.randomUUID(),
+            key: makeClientId(),
             manufacturer_id: args.manufacturer_id,
             manufacturer_name: args.manufacturer_name,
             model_id: args.model_id,
@@ -938,7 +950,7 @@ export default function DashboardPage() {
         }
         return [
           {
-            key: crypto.randomUUID(),
+            key: makeClientId(),
             manufacturer_id: selectedManufacturer.id,
             manufacturer_name: selectedManufacturer.name,
             model_id: selectedModel.id,
@@ -1022,7 +1034,7 @@ export default function DashboardPage() {
       startNewOrder();
       setDraftItems(
         latest.items.map((it) => ({
-          key: crypto.randomUUID(),
+          key: makeClientId(),
           manufacturer_id: it.manufacturer_id,
           manufacturer_name: it.manufacturer_name,
           model_id: it.model_id,
@@ -1310,7 +1322,7 @@ export default function DashboardPage() {
       setSupplierName("");
       setDraftItems(
         data.items.map((it) => ({
-          key: crypto.randomUUID(),
+          key: makeClientId(),
           ...it,
           available_stock: Math.max(0, Math.floor(it.available_stock ?? 0)),
         }))
@@ -1324,6 +1336,40 @@ export default function DashboardPage() {
       setImportFileName(null);
     }
   }
+
+  const sparePartCategoryById = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const p of spareParts) {
+      map[p.id] = p.category || "Others";
+    }
+    return map;
+  }, [spareParts]);
+
+  const sortedItems = useMemo(() => {
+    return currentItems
+      .slice()
+      .sort((a, b) =>
+        `${a.manufacturer_name}/${a.model_name}/${a.spare_part_name}`.localeCompare(
+          `${b.manufacturer_name}/${b.model_name}/${b.spare_part_name}`
+        )
+      );
+  }, [currentItems]);
+
+  const visibleItems = useMemo(() => sortedItems.slice(0, visibleItemCount), [sortedItems, visibleItemCount]);
+  const hasMoreItems = sortedItems.length > visibleItemCount;
+
+  const itemsByCategoryVisible = useMemo(() => {
+    const by: Record<string, Array<OrderItem | DraftItem>> = {};
+    for (const it of visibleItems) {
+      const category = ("spare_part_category" in it && it.spare_part_category) || sparePartCategoryById[it.spare_part_id] || "Others";
+      if (!by[category]) by[category] = [];
+      by[category].push(it);
+    }
+    return by;
+  }, [visibleItems, sparePartCategoryById]);
+
+  const visibleSavedOrders = useMemo(() => orders.slice(0, visibleSavedOrdersCount), [orders, visibleSavedOrdersCount]);
+  const hasMoreSavedOrders = orders.length > visibleSavedOrdersCount;
 
   const totalQty = useMemo(
     () => currentItems.reduce((sum, it) => sum + (Number.isFinite(it.quantity) ? it.quantity : 0), 0),
@@ -1341,8 +1387,7 @@ export default function DashboardPage() {
       const effectiveQty = editingItemId === key ? editingQuantity : it.quantity;
       const stock = "available_stock" in it ? (it.available_stock ?? 0) : 0;
 
-      const sparePart = spareParts.find((p) => p.id === it.spare_part_id);
-      const category = ("spare_part_category" in it && it.spare_part_category) || sparePart?.category || "Others";
+      const category = ("spare_part_category" in it && it.spare_part_category) || sparePartCategoryById[it.spare_part_id] || "Others";
 
       const requiredQty = Number.isFinite(effectiveQty) ? Math.max(0, Math.floor(effectiveQty)) : 0;
       const availableStock = Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : 0;
@@ -1366,7 +1411,7 @@ export default function DashboardPage() {
       totalToPurchase,
       categories: categoryRows,
     };
-  }, [currentItems, editingItemId, editingQuantity, spareParts]);
+  }, [currentItems, editingItemId, editingQuantity, sparePartCategoryById]);
 
   const primaryBtn =
     "inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
@@ -1374,6 +1419,8 @@ export default function DashboardPage() {
     "inline-flex items-center justify-center rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
   const outlineBtn =
     "inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
+  const dangerBtn =
+    "inline-flex items-center justify-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50";
   const primarySmBtn =
     "inline-flex items-center justify-center rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-50";
   const outlineSmBtn =
@@ -1778,153 +1825,264 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b bg-zinc-50">
-                    <th className="px-3 py-2 font-medium">Manufacturer</th>
-                    <th className="px-3 py-2 font-medium">Model</th>
-                    <th className="px-3 py-2 font-medium">Spare Part</th>
-                    <th className="px-3 py-2 font-medium">Required Qty</th>
-                    <th className="px-3 py-2 font-medium">Stock</th>
-                    <th className="px-3 py-2 font-medium">To Purchase</th>
-                    <th className="px-3 py-2 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentItems.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-10 text-center" colSpan={7}>
-                        <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
-                          <div className="mb-1 text-sm font-semibold">No items added yet</div>
-                          <div className="text-sm text-gray-600">Start by selecting a manufacturer, model, and spare part.</div>
+            {currentItems.length === 0 ? (
+              <div className="px-3 py-10 text-center">
+                <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
+                  <div className="mb-1 text-sm font-semibold">No items added yet</div>
+                  <div className="text-sm text-gray-600">Start by selecting a manufacturer, model, and spare part.</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Mobile/Tablet: Cards */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:hidden">
+                  {visibleItems.map((item) => {
+                    const rowKey = "id" in item ? item.id : item.key;
+                    const actionKey = String(rowKey);
+                    const isEditing = editingItemId === rowKey;
+                    const isSavingEdit = !!savingEditByKey[actionKey];
+                    const isDeletingItem = !!deletingItemByKey[actionKey];
+                    const rowBusy = isSavingEdit || isDeletingItem;
+
+                    const effectiveQty = isEditing ? editingQuantity : item.quantity;
+                    const stock = "available_stock" in item ? (item.available_stock ?? 0) : 0;
+                    const requiredQty = Number.isFinite(effectiveQty) ? Math.max(0, Math.floor(effectiveQty)) : 0;
+                    const availableStock = Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : 0;
+                    const toPurchase = calcToPurchase(requiredQty, availableStock);
+
+                    return (
+                      <div key={String(rowKey)} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                        <div className="text-sm font-semibold text-gray-900">{item.spare_part_name}</div>
+                        <div className="mt-0.5 text-xs text-gray-600">
+                          {item.manufacturer_name} • {item.model_name}
                         </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    CATEGORY_ORDER.flatMap((category) => {
-                      const itemsInCategory = currentItems
-                        .filter((it) => {
-                          const sparePart = spareParts.find((p) => p.id === it.spare_part_id);
-                          const cat = ("spare_part_category" in it && it.spare_part_category) || sparePart?.category || "Others";
-                          return cat === category;
-                        })
-                        .slice()
-                        .sort((a, b) =>
-                          `${a.manufacturer_name}/${a.model_name}/${a.spare_part_name}`.localeCompare(
-                            `${b.manufacturer_name}/${b.model_name}/${b.spare_part_name}`
-                          )
-                        );
 
-                      if (itemsInCategory.length === 0) return [];
+                        <div className="mt-3 grid grid-cols-2 gap-3">
+                          <div>
+                            <div className="text-xs font-medium text-gray-600">Required Qty</div>
+                            {isEditing ? (
+                              <input
+                                className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                                type="number"
+                                min={1}
+                                value={editingQuantity}
+                                onChange={(e) => setEditingQuantity(Number(e.target.value))}
+                                disabled={rowBusy}
+                              />
+                            ) : (
+                              <div className="mt-2 text-base font-semibold text-gray-900">{requiredQty}</div>
+                            )}
+                          </div>
 
-                      return [
-                        (
-                          <tr key={`cat-${category}`} className="border-b bg-gray-50">
-                            <td className="px-3 py-2 text-xs font-semibold text-gray-700" colSpan={7}>
-                              {category}
-                            </td>
-                          </tr>
-                        ),
-                        ...itemsInCategory.map((item) => {
-                          const rowKey = "id" in item ? item.id : item.key;
-                          const actionKey = String(rowKey);
-                          const isEditing = editingItemId === rowKey;
-                          const isSavingEdit = !!savingEditByKey[actionKey];
-                          const isDeletingItem = !!deletingItemByKey[actionKey];
-                          const rowBusy = isSavingEdit || isDeletingItem;
-                          const effectiveQty = isEditing ? editingQuantity : item.quantity;
-                          const stock = "available_stock" in item ? (item.available_stock ?? 0) : 0;
-                          const requiredQty = Number.isFinite(effectiveQty) ? Math.max(0, Math.floor(effectiveQty)) : 0;
-                          const availableStock = Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : 0;
-                          const toPurchase = calcToPurchase(requiredQty, availableStock);
+                          <div>
+                            <div className="text-xs font-medium text-gray-600">To Purchase</div>
+                            <div className={`mt-2 text-base font-semibold ${toPurchase > 0 ? "text-red-700" : "text-green-700"}`}>
+                              {toPurchase}
+                            </div>
+                          </div>
+                        </div>
 
-                          return (
-                            <tr key={String(rowKey)} className="border-b">
-                              <td className="px-3 py-2">{item.manufacturer_name}</td>
-                              <td className="px-3 py-2">{item.model_name}</td>
-                              <td className="px-3 py-2">{item.spare_part_name}</td>
-                              <td className="px-3 py-2">
-                                {isEditing ? (
-                                  <input
-                                    className="w-20 rounded-md border px-2 py-1"
-                                    type="number"
-                                    min={1}
-                                    value={editingQuantity}
-                                    onChange={(e) => setEditingQuantity(Number(e.target.value))}
-                                  />
-                                ) : (
-                                  <span>{item.quantity}</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2">
-                                {"id" in item ? (
-                                  <input
-                                    className="w-20 rounded-md border px-2 py-1"
-                                    type="number"
-                                    min={0}
-                                    value={availableStock}
-                                    disabled={!!savingStockById[item.id]}
-                                    onChange={(e) => updateSavedStockLocal(item.id, Number(e.target.value))}
-                                    onBlur={() => void persistSavedStock(item.id)}
-                                  />
-                                ) : (
-                                  <input
-                                    className="w-20 rounded-md border px-2 py-1"
-                                    type="number"
-                                    min={0}
-                                    value={availableStock}
-                                    onChange={(e) => updateDraftStock(item.key, Number(e.target.value))}
-                                    onBlur={() =>
-                                      void (async () => {
-                                        try {
-                                          await persistInventoryForPart(item.manufacturer_id, item.model_id, item.spare_part_id, availableStock);
-                                          showToast("success", "Stock updated");
-                                        } catch (e) {
-                                          if (e instanceof ApiError) {
-                                            setError(e.detail || e.message);
-                                          } else {
-                                            setError(e instanceof Error ? e.message : "Failed to update inventory");
-                                          }
-                                        }
-                                      })()
+                        <div className="mt-3">
+                          <div className="text-xs font-medium text-gray-600">Available Stock</div>
+                          {"id" in item ? (
+                            <input
+                              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-gray-50"
+                              type="number"
+                              min={0}
+                              value={availableStock}
+                              disabled={!!savingStockById[item.id] || rowBusy}
+                              onChange={(e) => updateSavedStockLocal(item.id, Number(e.target.value))}
+                              onBlur={() => void persistSavedStock(item.id)}
+                            />
+                          ) : (
+                            <input
+                              className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                              type="number"
+                              min={0}
+                              value={availableStock}
+                              disabled={rowBusy}
+                              onChange={(e) => updateDraftStock(item.key, Number(e.target.value))}
+                              onBlur={() =>
+                                void (async () => {
+                                  try {
+                                    await persistInventoryForPart(item.manufacturer_id, item.model_id, item.spare_part_id, availableStock);
+                                    showToast("success", "Stock updated");
+                                  } catch (e) {
+                                    if (e instanceof ApiError) {
+                                      setError(e.detail || e.message);
+                                    } else {
+                                      setError(e instanceof Error ? e.message : "Failed to update inventory");
                                     }
-                                  />
-                                )}
-                              </td>
-                              <td className={`px-3 py-2 font-semibold ${toPurchase > 0 ? "text-red-700" : "text-green-700"}`}>
-                                {toPurchase}
-                              </td>
-                              <td className="px-3 py-2">
-                                {isEditing ? (
-                                  <div className="flex gap-2">
-                                    <button className={primarySmBtn} onClick={() => void saveEdit(item)} disabled={rowBusy}>
-                                      {isSavingEdit ? "Saving..." : "Save"}
-                                    </button>
-                                    <button className={outlineSmBtn} onClick={cancelEdit} disabled={rowBusy}>
-                                      Cancel
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex gap-2">
-                                    <button className={outlineSmBtn} onClick={() => startEdit(item)} disabled={rowBusy}>
-                                      Edit
-                                    </button>
-                                    <button className={dangerSmBtn} onClick={() => void handleDeleteItem(item)} disabled={rowBusy}>
-                                      {isDeletingItem ? "Deleting..." : "Delete"}
-                                    </button>
-                                  </div>
-                                )}
+                                  }
+                                })()
+                              }
+                            />
+                          )}
+                        </div>
+
+                        <div className="mt-4">
+                          {isEditing ? (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button className={`${primaryBtn} w-full`} onClick={() => void saveEdit(item)} disabled={rowBusy}>
+                                {isSavingEdit ? "Saving..." : "Save"}
+                              </button>
+                              <button className={`${outlineBtn} w-full`} onClick={cancelEdit} disabled={rowBusy}>
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button className={`${outlineBtn} w-full`} onClick={() => startEdit(item)} disabled={rowBusy}>
+                                Edit
+                              </button>
+                              <button className={`${dangerBtn} w-full`} onClick={() => void handleDeleteItem(item)} disabled={rowBusy}>
+                                {isDeletingItem ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop: Table */}
+                <div className="hidden overflow-x-auto lg:block">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b bg-zinc-50">
+                        <th className="px-3 py-2 font-medium">Manufacturer</th>
+                        <th className="px-3 py-2 font-medium">Model</th>
+                        <th className="px-3 py-2 font-medium">Spare Part</th>
+                        <th className="px-3 py-2 font-medium">Required Qty</th>
+                        <th className="px-3 py-2 font-medium">Stock</th>
+                        <th className="px-3 py-2 font-medium">To Purchase</th>
+                        <th className="px-3 py-2 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {CATEGORY_ORDER.flatMap((category) => {
+                        const itemsInCategory = itemsByCategoryVisible[category] || [];
+                        if (itemsInCategory.length === 0) return [];
+
+                        return [
+                          (
+                            <tr key={`cat-${category}`} className="border-b bg-gray-50">
+                              <td className="px-3 py-2 text-xs font-semibold text-gray-700" colSpan={7}>
+                                {category}
                               </td>
                             </tr>
-                          );
-                        }),
-                      ];
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                          ),
+                          ...itemsInCategory.map((item) => {
+                            const rowKey = "id" in item ? item.id : item.key;
+                            const actionKey = String(rowKey);
+                            const isEditing = editingItemId === rowKey;
+                            const isSavingEdit = !!savingEditByKey[actionKey];
+                            const isDeletingItem = !!deletingItemByKey[actionKey];
+                            const rowBusy = isSavingEdit || isDeletingItem;
+                            const effectiveQty = isEditing ? editingQuantity : item.quantity;
+                            const stock = "available_stock" in item ? (item.available_stock ?? 0) : 0;
+                            const requiredQty = Number.isFinite(effectiveQty) ? Math.max(0, Math.floor(effectiveQty)) : 0;
+                            const availableStock = Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : 0;
+                            const toPurchase = calcToPurchase(requiredQty, availableStock);
+
+                            return (
+                              <tr key={String(rowKey)} className="border-b">
+                                <td className="px-3 py-2">{item.manufacturer_name}</td>
+                                <td className="px-3 py-2">{item.model_name}</td>
+                                <td className="px-3 py-2">{item.spare_part_name}</td>
+                                <td className="px-3 py-2">
+                                  {isEditing ? (
+                                    <input
+                                      className="w-20 rounded-md border px-2 py-1"
+                                      type="number"
+                                      min={1}
+                                      value={editingQuantity}
+                                      onChange={(e) => setEditingQuantity(Number(e.target.value))}
+                                      disabled={rowBusy}
+                                    />
+                                  ) : (
+                                    <span>{item.quantity}</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {"id" in item ? (
+                                    <input
+                                      className="w-20 rounded-md border px-2 py-1"
+                                      type="number"
+                                      min={0}
+                                      value={availableStock}
+                                      disabled={!!savingStockById[item.id] || rowBusy}
+                                      onChange={(e) => updateSavedStockLocal(item.id, Number(e.target.value))}
+                                      onBlur={() => void persistSavedStock(item.id)}
+                                    />
+                                  ) : (
+                                    <input
+                                      className="w-20 rounded-md border px-2 py-1"
+                                      type="number"
+                                      min={0}
+                                      value={availableStock}
+                                      disabled={rowBusy}
+                                      onChange={(e) => updateDraftStock(item.key, Number(e.target.value))}
+                                      onBlur={() =>
+                                        void (async () => {
+                                          try {
+                                            await persistInventoryForPart(item.manufacturer_id, item.model_id, item.spare_part_id, availableStock);
+                                            showToast("success", "Stock updated");
+                                          } catch (e) {
+                                            if (e instanceof ApiError) {
+                                              setError(e.detail || e.message);
+                                            } else {
+                                              setError(e instanceof Error ? e.message : "Failed to update inventory");
+                                            }
+                                          }
+                                        })()
+                                      }
+                                    />
+                                  )}
+                                </td>
+                                <td className={`px-3 py-2 font-semibold ${toPurchase > 0 ? "text-red-700" : "text-green-700"}`}>
+                                  {toPurchase}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {isEditing ? (
+                                    <div className="flex gap-2">
+                                      <button className={primarySmBtn} onClick={() => void saveEdit(item)} disabled={rowBusy}>
+                                        {isSavingEdit ? "Saving..." : "Save"}
+                                      </button>
+                                      <button className={outlineSmBtn} onClick={cancelEdit} disabled={rowBusy}>
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex gap-2">
+                                      <button className={outlineSmBtn} onClick={() => startEdit(item)} disabled={rowBusy}>
+                                        Edit
+                                      </button>
+                                      <button className={dangerSmBtn} onClick={() => void handleDeleteItem(item)} disabled={rowBusy}>
+                                        {isDeletingItem ? "Deleting..." : "Delete"}
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          }),
+                        ];
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {hasMoreItems ? (
+                  <div className="mt-4 flex justify-center">
+                    <button className={outlineBtn} type="button" onClick={() => setVisibleItemCount((v) => v + 50)}>
+                      Load more
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
           </section>
 
           <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-md">
@@ -1938,75 +2096,118 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b bg-zinc-50">
-                    <th className="px-3 py-2 font-medium">Order Name</th>
-                    <th className="px-3 py-2 font-medium">Date</th>
-                    <th className="px-3 py-2 font-medium">Total Items</th>
-                    <th className="px-3 py-2 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-10 text-center" colSpan={4}>
-                        <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
-                          <div className="mb-1 text-sm font-semibold">No saved orders yet</div>
-                          <div className="text-sm text-gray-600">Create a draft and click “Save Order”.</div>
+            {orders.length === 0 ? (
+              <div className="px-3 py-10 text-center">
+                <div className="mx-auto max-w-md rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-gray-700">
+                  <div className="mb-1 text-sm font-semibold">No saved orders yet</div>
+                  <div className="text-sm text-gray-600">Create a draft and click “Save Order”.</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Mobile/Tablet: Cards */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:hidden">
+                  {visibleSavedOrders.map((o) => {
+                    const busy =
+                      (savedOrderActionById[o.id]?.opening ?? false) ||
+                      (savedOrderActionById[o.id]?.renaming ?? false) ||
+                      (savedOrderActionById[o.id]?.deleting ?? false);
+
+                    return (
+                      <div key={o.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                        <div className="text-sm font-semibold text-gray-900">{o.order_name}</div>
+                        <div className="mt-0.5 text-xs text-gray-600">
+                          {fmtDate(o.created_at)} • {o.total_items} item{o.total_items === 1 ? "" : "s"}
                         </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    orders.map((o) => (
-                      <tr key={o.id} className="border-b">
-                        <td className="px-3 py-2">{o.order_name}</td>
-                        <td className="px-3 py-2">{fmtDate(o.created_at)}</td>
-                        <td className="px-3 py-2">{o.total_items}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex gap-2">
-                            <button
-                              className={outlineSmBtn}
-                              onClick={() => void openOrder(o.id)}
-                              disabled={
-                                (savedOrderActionById[o.id]?.opening ?? false) ||
-                                (savedOrderActionById[o.id]?.renaming ?? false) ||
-                                (savedOrderActionById[o.id]?.deleting ?? false)
-                              }
-                            >
-                              {savedOrderActionById[o.id]?.opening ? "Opening..." : "Open/Edit"}
-                            </button>
-                            <button
-                              className={outlineSmBtn}
-                              onClick={() => void renameOrder(o.id, o.order_name)}
-                              disabled={
-                                (savedOrderActionById[o.id]?.opening ?? false) ||
-                                (savedOrderActionById[o.id]?.renaming ?? false) ||
-                                (savedOrderActionById[o.id]?.deleting ?? false)
-                              }
-                            >
-                              {savedOrderActionById[o.id]?.renaming ? "Renaming..." : "Rename"}
-                            </button>
-                            <button
-                              className={dangerSmBtn}
-                              onClick={() => void deleteOrder(o.id)}
-                              disabled={
-                                (savedOrderActionById[o.id]?.opening ?? false) ||
-                                (savedOrderActionById[o.id]?.renaming ?? false) ||
-                                (savedOrderActionById[o.id]?.deleting ?? false)
-                              }
-                            >
-                              {savedOrderActionById[o.id]?.deleting ? "Deleting..." : "Delete"}
-                            </button>
-                          </div>
-                        </td>
+
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                          <button className={`${outlineBtn} w-full`} onClick={() => void openOrder(o.id)} disabled={busy}>
+                            {savedOrderActionById[o.id]?.opening ? "Opening..." : "Open/Edit"}
+                          </button>
+                          <button className={`${outlineBtn} w-full`} onClick={() => void renameOrder(o.id, o.order_name)} disabled={busy}>
+                            {savedOrderActionById[o.id]?.renaming ? "Renaming..." : "Rename"}
+                          </button>
+                        </div>
+
+                        <div className="mt-2">
+                          <button className={`${dangerBtn} w-full`} onClick={() => void deleteOrder(o.id)} disabled={busy}>
+                            {savedOrderActionById[o.id]?.deleting ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop: Table */}
+                <div className="hidden overflow-x-auto lg:block">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b bg-zinc-50">
+                        <th className="px-3 py-2 font-medium">Order Name</th>
+                        <th className="px-3 py-2 font-medium">Date</th>
+                        <th className="px-3 py-2 font-medium">Total Items</th>
+                        <th className="px-3 py-2 font-medium">Actions</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {visibleSavedOrders.map((o) => (
+                        <tr key={o.id} className="border-b">
+                          <td className="px-3 py-2">{o.order_name}</td>
+                          <td className="px-3 py-2">{fmtDate(o.created_at)}</td>
+                          <td className="px-3 py-2">{o.total_items}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex gap-2">
+                              <button
+                                className={outlineSmBtn}
+                                onClick={() => void openOrder(o.id)}
+                                disabled={
+                                  (savedOrderActionById[o.id]?.opening ?? false) ||
+                                  (savedOrderActionById[o.id]?.renaming ?? false) ||
+                                  (savedOrderActionById[o.id]?.deleting ?? false)
+                                }
+                              >
+                                {savedOrderActionById[o.id]?.opening ? "Opening..." : "Open/Edit"}
+                              </button>
+                              <button
+                                className={outlineSmBtn}
+                                onClick={() => void renameOrder(o.id, o.order_name)}
+                                disabled={
+                                  (savedOrderActionById[o.id]?.opening ?? false) ||
+                                  (savedOrderActionById[o.id]?.renaming ?? false) ||
+                                  (savedOrderActionById[o.id]?.deleting ?? false)
+                                }
+                              >
+                                {savedOrderActionById[o.id]?.renaming ? "Renaming..." : "Rename"}
+                              </button>
+                              <button
+                                className={dangerSmBtn}
+                                onClick={() => void deleteOrder(o.id)}
+                                disabled={
+                                  (savedOrderActionById[o.id]?.opening ?? false) ||
+                                  (savedOrderActionById[o.id]?.renaming ?? false) ||
+                                  (savedOrderActionById[o.id]?.deleting ?? false)
+                                }
+                              >
+                                {savedOrderActionById[o.id]?.deleting ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {hasMoreSavedOrders ? (
+                  <div className="mt-4 flex justify-center">
+                    <button className={outlineBtn} type="button" onClick={() => setVisibleSavedOrdersCount((v) => v + 50)}>
+                      Load more
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
           </section>
         </div>
       </div>
