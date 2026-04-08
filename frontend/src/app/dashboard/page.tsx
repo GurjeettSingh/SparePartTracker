@@ -1536,7 +1536,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="mx-auto max-w-6xl px-4 py-6">
+        <div className="mx-auto max-w-6xl px-4 py-6 pb-28 lg:pb-6">
           {toast ? (
             <div
               className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
@@ -1619,7 +1619,7 @@ export default function DashboardPage() {
                   ) : null}
 
                   <button
-                    className={primaryBtn}
+                    className={`${primaryBtn} hidden lg:inline-flex`}
                     onClick={() => void handleAddItem()}
                     disabled={loading || savingItem || !selectedManufacturer || !selectedModel || !selectedPart || quantity <= 0}
                   >
@@ -2275,6 +2275,20 @@ export default function DashboardPage() {
               </>
             )}
           </section>
+        </div>
+
+        {/* Mobile sticky Add Item bar */}
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-gray-200 bg-white/95 backdrop-blur lg:hidden">
+          <div className="mx-auto max-w-6xl px-4 py-3">
+            <button
+              className={`${primaryBtn} w-full py-3 text-base`}
+              onClick={() => void handleAddItem()}
+              disabled={loading || savingItem || !selectedManufacturer || !selectedModel || !selectedPart || quantity <= 0}
+            >
+              {savingItem ? "Saving…" : "Add Item"}
+            </button>
+            <div className="h-[env(safe-area-inset-bottom)]" />
+          </div>
         </div>
       </div>
     </RequireAuth>
