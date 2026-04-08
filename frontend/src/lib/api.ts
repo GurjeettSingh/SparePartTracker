@@ -73,7 +73,10 @@ export async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T>
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
-      signal: mergeAbortSignals(init?.signal, timeoutController.signal),
+      signal: mergeAbortSignals(
+        init?.signal ?? undefined,
+        timeoutController.signal
+      ),
       headers: {
         "Content-Type": "application/json",
         ...getAuthHeaders(),
