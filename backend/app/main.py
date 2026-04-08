@@ -284,8 +284,13 @@ def update_profile(
 
 @app.on_event("startup")
 def on_startup() -> None:
-    _ensure_schema()
+    # ✅ FIRST: create tables
     Base.metadata.create_all(bind=engine)
+
+    # ✅ THEN: modify schema
+    _ensure_schema()
+
+    # ✅ THEN: seed data
     db = get_db_session()
     try:
         seed_if_empty(db)
