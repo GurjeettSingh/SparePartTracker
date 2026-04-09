@@ -541,9 +541,9 @@ def _items_to_schema(db: Session, order: models.Order, items: list[models.OrderI
         item.model
         item.spare_part
 
-    keys = {(it.manufacturer_id, it.model_id, it.spare_part_id) for it in items}
-    catalog_by_key: dict[tuple[int, int, int], models.PartCatalog] = {}
-    if keys:
+    exact_keys = {(it.manufacturer_id, it.model_id, it.spare_part_id) for it in items}
+    catalog_by_exact: dict[tuple[int, int, int], models.PartCatalog] = {}
+    if exact_keys:
         rows = (
             db.execute(
                 select(models.PartCatalog).where(
@@ -551,16 +551,40 @@ def _items_to_schema(db: Session, order: models.Order, items: list[models.OrderI
                         models.PartCatalog.manufacturer_id,
                         models.PartCatalog.model_id,
                         models.PartCatalog.spare_part_id,
-                    ).in_(keys)
+                    ).in_(list(exact_keys))
                 )
             )
             .scalars()
             .all()
         )
-        catalog_by_key = {
-            (r.manufacturer_id, r.model_id, r.spare_part_id): r
-            for r in rows
-        }
+        catalog_by_exact = {(r.manufacturer_id, r.model_id, r.spare_part_id): r for r in rows}
+
+    # Fallback lookup: model_id implies manufacturer_id via FK, so (model_id, spare_part_id)
+    # is sufficient even if an OrderItem's manufacturer_id is inconsistent.
+    missing_model_part_keys = {
+        (it.model_id, it.spare_part_id)
+        for it in items
+        if (it.manufacturer_id, it.model_id, it.spare_part_id) not in catalog_by_exact
+    }
+    catalog_by_model_part: dict[tuple[int, int], models.PartCatalog] = {}
+    if missing_model_part_keys:
+        rows = (
+            db.execute(
+                select(models.PartCatalog).where(
+                    tuple_(
+                        models.PartCatalog.model_id,
+                        models.PartCatalog.spare_part_id,
+                    ).in_(list(missing_model_part_keys))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        catalog_by_model_part = {(r.model_id, r.spare_part_id): r for r in rows}
+
+    def _catalog_for_item(item: models.OrderItem) -> models.PartCatalog | None:
+        exact_key = (item.manufacturer_id, item.model_id, item.spare_part_id)
+        return catalog_by_exact.get(exact_key) or catalog_by_model_part.get((item.model_id, item.spare_part_id))
 
     return OrderWithItemsOut(
         id=order.id,
@@ -581,20 +605,41 @@ def _items_to_schema(db: Session, order: models.Order, items: list[models.OrderI
                 spare_part_category=getattr(item.spare_part, "category", "Others") or "Others",
                 quantity=item.quantity,
                 available_stock=getattr(item, "available_stock", 0) or 0,
-                to_purchase=getattr(item, "to_purchase", 0) or _calc_to_purchase(item.quantity, getattr(item, "available_stock", 0) or 0),
-                typical_specification=catalog_by_key.get(
-                    (item.manufacturer_id, item.model_id, item.spare_part_id)
-                ).typical_specification
-                if catalog_by_key.get((item.manufacturer_id, item.model_id, item.spare_part_id))
-                else None,
-                oem_part_number=catalog_by_key.get(
-                    (item.manufacturer_id, item.model_id, item.spare_part_id)
-                ).oem_part_number
-                if catalog_by_key.get((item.manufacturer_id, item.model_id, item.spare_part_id))
-                else None,
+                to_purchase=getattr(item, "to_purchase", 0)
+                or _calc_to_purchase(item.quantity, getattr(item, "available_stock", 0) or 0),
+                typical_specification=(catalog_row.typical_specification if (catalog_row := _catalog_for_item(item)) else None),
+                oem_part_number=(catalog_row.oem_part_number if catalog_row else None),
             )
             for item in items
         ],
+    )
+
+
+def _lookup_part_catalog(db: Session, manufacturer_id: int, model_id: int, spare_part_id: int) -> models.PartCatalog | None:
+    row = (
+        db.execute(
+            select(models.PartCatalog).where(
+                models.PartCatalog.manufacturer_id == manufacturer_id,
+                models.PartCatalog.model_id == model_id,
+                models.PartCatalog.spare_part_id == spare_part_id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is not None:
+        return row
+
+    # Fallback: model_id implies manufacturer_id; tolerate inconsistent OrderItem.manufacturer_id.
+    return (
+        db.execute(
+            select(models.PartCatalog).where(
+                models.PartCatalog.model_id == model_id,
+                models.PartCatalog.spare_part_id == spare_part_id,
+            )
+        )
+        .scalars()
+        .first()
     )
 
 
@@ -662,6 +707,8 @@ def add_order_item(payload: OrderItemCreate, db: Session = Depends(get_db), curr
         existing.model
         existing.spare_part
 
+        catalog_row = _lookup_part_catalog(db, existing.manufacturer_id, existing.model_id, existing.spare_part_id)
+
         return OrderItemOut(
             id=existing.id,
             order_id=existing.order_id,
@@ -675,12 +722,16 @@ def add_order_item(payload: OrderItemCreate, db: Session = Depends(get_db), curr
             spare_part_category=getattr(existing.spare_part, "category", "Others") or "Others",
             available_stock=getattr(existing, "available_stock", 0) or 0,
             to_purchase=getattr(existing, "to_purchase", 0) or _calc_to_purchase(existing.quantity, getattr(existing, "available_stock", 0) or 0),
+            typical_specification=catalog_row.typical_specification if catalog_row else None,
+            oem_part_number=catalog_row.oem_part_number if catalog_row else None,
         )
 
     db.refresh(item)
     item.manufacturer
     item.model
     item.spare_part
+
+    catalog_row = _lookup_part_catalog(db, item.manufacturer_id, item.model_id, item.spare_part_id)
 
     return OrderItemOut(
         id=item.id,
@@ -695,6 +746,8 @@ def add_order_item(payload: OrderItemCreate, db: Session = Depends(get_db), curr
         spare_part_category=getattr(item.spare_part, "category", "Others") or "Others",
         available_stock=getattr(item, "available_stock", 0) or 0,
         to_purchase=getattr(item, "to_purchase", 0) or _calc_to_purchase(item.quantity, getattr(item, "available_stock", 0) or 0),
+        typical_specification=catalog_row.typical_specification if catalog_row else None,
+        oem_part_number=catalog_row.oem_part_number if catalog_row else None,
     )
 
 
@@ -724,6 +777,8 @@ def update_order_item(item_id: int, payload: OrderItemUpdate, db: Session = Depe
     item.model
     item.spare_part
 
+    catalog_row = _lookup_part_catalog(db, item.manufacturer_id, item.model_id, item.spare_part_id)
+
     return OrderItemOut(
         id=item.id,
         order_id=item.order_id,
@@ -737,6 +792,8 @@ def update_order_item(item_id: int, payload: OrderItemUpdate, db: Session = Depe
         spare_part_category=getattr(item.spare_part, "category", "Others") or "Others",
         available_stock=getattr(item, "available_stock", 0) or 0,
         to_purchase=getattr(item, "to_purchase", 0) or _calc_to_purchase(item.quantity, getattr(item, "available_stock", 0) or 0),
+        typical_specification=catalog_row.typical_specification if catalog_row else None,
+        oem_part_number=catalog_row.oem_part_number if catalog_row else None,
     )
 
 
